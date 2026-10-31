@@ -340,7 +340,8 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
 | Cột 1 | Cột 2 |
 |---|---|
 | Dữ liệu 1 | Dữ liệu 2 |
-6. Nếu trang có hình vẽ (hình học, đồ thị, sơ đồ), KHÔNG mô tả hình bằng chữ. Tại đúng vị trí hình xuất hiện (theo thứ tự đọc), viết MỘT dòng riêng: [IMAGE: ymin, xmin, ymax, xmax]. Tọa độ là SỐ NGUYÊN từ 0 đến 1000 theo chiều cao và chiều rộng của cả trang (gốc ở góc trên bên trái), KHÔNG dùng số thập phân, KHÔNG dùng phần trăm. Khung phải bao trọn hình, gồm trục tọa độ, nhãn điểm (A, B, C...), số trên trục; không bao gồm chữ của đề bài. Ví dụ: [IMAGE: 320, 450, 610, 880]. Không coi bảng số liệu hay công thức là hình.`;
+6. Nếu trang có hình vẽ (hình học, đồ thị, sơ đồ), KHÔNG mô tả hình bằng chữ. Tại đúng vị trí hình xuất hiện (theo thứ tự đọc), viết MỘT dòng riêng: [IMAGE: ymin, xmin, ymax, xmax]. Tọa độ là SỐ NGUYÊN từ 0 đến 1000 theo chiều cao và chiều rộng của cả trang (gốc ở góc trên bên trái), KHÔNG dùng số thập phân, KHÔNG dùng phần trăm. Khung phải bao trọn hình, gồm trục tọa độ, nhãn điểm (A, B, C...), số trên trục; không bao gồm chữ của đề bài. Ví dụ: [IMAGE: 320, 450, 610, 880]. Không coi bảng số liệu hay công thức là hình.
+7. Mỗi câu/đoạn văn viết LIÊN TỤC trên MỘT dòng: KHÔNG xuống dòng theo bề ngang trang giấy. Chỉ xuống dòng khi bắt đầu Câu/Bài mới, ý a) b) c), đáp án A. B. C. D., mục mới, hoặc khi có công thức/hình/bảng đứng riêng một dòng.`;
 
     let apiKeys = [];
     let currentKeyIdx = 0;
@@ -1378,7 +1379,7 @@ QUY TẮC CỰC KỲ QUAN TRỌNG:
       if (!$('optHeaderFooter').checked) extra.push('BỎ QUA hoàn toàn tiêu đề đầu trang (header), chân trang (footer) và số trang; không chép chúng vào kết quả.');
       const ig = getIgnoreList();
       if (ig.length) extra.push('KHÔNG chép các nội dung sau nếu xuất hiện trên trang (bỏ qua hoàn toàn):\n' + ig.map(x => '- ' + x).join('\n'));
-      return SYSTEM_PROMPT + (extra.length ? '\n' + extra.map((e, i) => `${7 + i}. ${e}`).join('\n') : '');
+      return SYSTEM_PROMPT + (extra.length ? '\n' + extra.map((e, i) => `${8 + i}. ${e}`).join('\n') : '');
     }
     function applyIgnore(text) {
       const ig = getIgnoreList();
@@ -2112,6 +2113,28 @@ function matchSub(t){ // a) b) c) d)
   if(!m) return null;
   return {label:m[1]+')',rest:t.slice(m[0].length)};
 }
+// ---------- Nối các dòng bị đứt do xuống dòng theo bề ngang trang giấy ----------
+function mergeWrappedLines(lines){
+  const cl=l=>String(l).replace(/<br\s*\/?>/gi,' ').trim();
+  const special=l=>!l||/^\|/.test(l)||/\[IMAGE/i.test(l)||/^[-*_=~\s]{3,}$/.test(l)||/^\$\$/.test(l)||/^\$+$/.test(l)||/^#{1,6}\s/.test(l);
+  const startsNew=l=>!!(matchHead(l)||matchSub(l)||OPT_RE.test(l)||/^\**\s*[a-hA-H]\s*[.)](\s|\*|$)/.test(l)||/^\**\s*\d+\s*[.)]\s/.test(l)||/^[-•+*]\s/.test(l)||/^\**\s*(PHẦN|HẾT|[IVX]+\s*\.)/i.test(l));
+  const closed=l=>/[.?!:;…]$/.test(l.replace(/[\s*$]+$/,''));
+  const textLens=lines.map(cl).filter(l=>!special(l)).map(l=>optVisibleLen(l));
+  const maxLen=Math.max(20,...textLens);
+  const out=[];
+  for(const raw of lines){
+    const L=cl(raw);
+    const P=out.length?cl(out[out.length-1]):'';
+    if(P&&L&&!special(P)&&!special(L)&&!startsNew(L)&&!closed(P)){
+      const bare=L.replace(/^[*(\s]+/,'');
+      const lower=/^\p{Ll}/u.test(bare), mathStart=/^\$[^$]/.test(bare);
+      const ratio=optVisibleLen(P)/maxLen;
+      if((lower&&ratio>=0.3)||(mathStart&&ratio>=0.35)||ratio>=0.75){ out[out.length-1]=P+' '+L; continue; }
+    }
+    out.push(raw);
+  }
+  return out;
+}
 function lineToXml(textLine,fmt){
   const plain=textLine.replace(/^\*\*/,'');
   if(/^\**PHẦN/i.test(textLine)||/^\**PHẦN/i.test(plain)) return {inner:inlineToXml(textLine,fmt,true),opts:{}};
@@ -2133,7 +2156,7 @@ async function buildDocxBlob(pagesData,fmt,getImage,JSZipLib,opts){
   const media=[]; let body='';
   pagesData.forEach((page,pIdx)=>{
     const startLen=body.length;
-    const lines=normalizeMathDelims(page.text).split('\n');
+    const lines=mergeWrappedLines(normalizeMathDelims(page.text).split('\n'));
     let tbl=[];
     const flushTbl=()=>{ if(tbl.length){ if(body.endsWith('</w:tbl>')) body+=TINY_P; body+=tableXml(tbl,fmt); tbl=[]; } };
     for(let i=0;i<lines.length;i++){
@@ -2818,7 +2841,7 @@ function mathtypeObjectXml(latex){
       return out + txt(text.slice(last));
     }
     function pageToTex(text, ctx) {
-      const lines = normalizeMathDelims(text).split('\n'); let out = '', tbl = [];
+      const lines = mergeWrappedLines(normalizeMathDelims(text).split('\n')); let out = '', tbl = [];
       const flush = () => {
         if (!tbl.length) return;
         const rows = tbl.filter(l => !/^\|[\s\-:|]+\|$/.test(l.trim())).map(splitTableRow);
